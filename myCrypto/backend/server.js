@@ -27,6 +27,12 @@ const abi = [
   "event Transfer(address indexed from, address indexed to, uint amount)",
 ];
 
+const getContractInstance = (privateKey) => {
+  const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+  const wallet = new ethers.Wallet(privateKey, provider);
+  return new ethers.Contract(CONTRACT_ADDRESS, abi, wallet);
+};
+
 // console.log("register");
 // User registration
 app.post("/register", async (req, res) => {
@@ -72,11 +78,9 @@ app.get("/balance", authenticateJWT, async (req, res) => {
     if (!user) return res.status(400).send("User not found");
 
     const privateKey = walletUtils.decrypt(user.private_key);
-    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-    const wallet = new ethers.Wallet(privateKey, provider);
-    const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, wallet);
+    const contract = getContractInstance(privateKey);
 
-    const balance = await contract.balanceOf(wallet.address);
+    const balance = await contract.balanceOf(contract.signer.address);
     res.json({ balance: ethers.utils.formatUnits(balance, 18) });
   } catch (err) {
     res.status(500).send(err.toString());
@@ -87,6 +91,7 @@ app.get("/balance", authenticateJWT, async (req, res) => {
 // Sending tokens
 app.post("/send", authenticateJWT, async (req, res) => {
   const { toEmail, amount } = req.body;
+  // const { key, amount } = req.body;
 
   try {
     const sender = await User.findByEmail(req.user.email);
@@ -97,9 +102,7 @@ app.post("/send", authenticateJWT, async (req, res) => {
     }
 
     const privateKey = walletUtils.decrypt(sender.private_key);
-    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-    const wallet = new ethers.Wallet(privateKey, provider);
-    const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, wallet);
+    const contract = getContractInstance(privateKey);
 
     const tx = await contract.transfer(
       receiver.public_key,
@@ -109,6 +112,7 @@ app.post("/send", authenticateJWT, async (req, res) => {
 
     res.json({ status: "success", txHash: tx.hash });
   } catch (err) {
+    console.log(err);
     res.status(500).send(err.toString());
   }
 });
@@ -121,9 +125,7 @@ app.post("/mint", authenticateJWT, async (req, res) => {
   try {
     const user = await User.findByEmail(req.user.email);
     const privateKey = walletUtils.decrypt(user.private_key);
-    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-    const wallet = new ethers.Wallet(privateKey, provider);
-    const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, wallet);
+    const contract = getContractInstance(privateKey);
 
     const tx = await contract.mint(
       wallet.address,
@@ -171,6 +173,69 @@ app.post("/faucet", async (req, res) => {
     res.json({ status: "success", txHash: tx.hash });
   } catch (err) {
     res.status(500).send(err.toString());
+  }
+});
+
+// Get transaction history for a user (sent and received tokens)
+app.get("/transactions", authenticateJWT, async (req, res) => {
+  try {
+    // Fetch user details
+    const user = await User.findByEmail(req.user.email);
+    if (!user) return res.status(400).send("User not found");
+
+    // Initialize provider and contract
+    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+    const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, provider);
+
+    // Get the user's public address
+    const userAddress = user.public_key;
+
+    // Define filter for Transfer events where the user is involved (either sender or receiver)
+    const filter = contract.filters.Transfer(userAddress, null); // as a sender
+    const filterReceived = contract.filters.Transfer(null, userAddress); // as a receiver
+
+    // Fetch logs for both sent and received transactions
+    const sentLogs = await provider.getLogs({
+      ...filter,
+      fromBlock: 0,
+      toBlock: "latest",
+    });
+
+    const receivedLogs = await provider.getLogs({
+      ...filterReceived,
+      fromBlock: 0,
+      toBlock: "latest",
+    });
+
+    // Combine sent and received logs and sort by block number
+    const allLogs = [...sentLogs, ...receivedLogs];
+    allLogs.sort((a, b) => a.blockNumber - b.blockNumber);
+
+    // Parse logs to human-readable transactions
+    const transactions = await Promise.all(
+      allLogs.map(async (log) => {
+        const parsedLog = contract.interface.parseLog(log);
+        const block = await provider.getBlock(log.blockNumber);
+        const fromEmail = await User.getEmailByPublicKey(parsedLog.args[0]);
+        const toEmail = await User.getEmailByPublicKey(parsedLog.args[1]);
+
+        return {
+          from: parsedLog.args[0],
+          fromEmail: fromEmail ? fromEmail.email : "unknown",
+          to: parsedLog.args[1],
+          toEmail: toEmail ? toEmail.email : "unknown",
+          amount: ethers.utils.formatUnits(parsedLog.args[2], 18),
+          blockNumber: log.blockNumber,
+          transactionHash: log.transactionHash,
+          timestamp: new Date(block.timestamp * 1000),
+        };
+      })
+    );
+
+    res.json({ transactions });
+  } catch (err) {
+    console.log(err);
+    res.status(500).send("Error fetching transaction history");
   }
 });
 

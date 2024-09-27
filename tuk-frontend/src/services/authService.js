@@ -47,7 +47,7 @@ const getToken = () => {
 };
 
 const getUser = () => {
-  return localStorage.getItem(USER_KEY);
+  return JSON.parse(localStorage.getItem(USER_KEY));
 };
 
 const isAuthenticated = () => {

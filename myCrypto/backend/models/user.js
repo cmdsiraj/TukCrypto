@@ -19,6 +19,18 @@ const User = {
     return res.rows[0];
   },
 
+  async getEmailByPublicKey(public_key) {
+    const query = "SELECT email FROM users WHERE public_key = $1";
+    const values = [public_key];
+    const res = await pool.query(query, values);
+    return res.rows[0];
+  },
+
+  // const query = "SELECT email FROM users WHERE public_key = $1";
+  //   const values = [public_key];
+  //   const res = await pool.query(query, values);
+  //   return res.rows[0];
+
   generateToken(user) {
     return jwt.sign({ email: user.email }, process.env.JWT_SECRET, {
       expiresIn: "8h",

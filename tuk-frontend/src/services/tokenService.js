@@ -12,14 +12,54 @@ const fetchBalance = async () => {
       },
     });
     const data = await response.json();
-    return data;
+    console.log(data);
+    return data.balance;
   } catch (error) {
     console.error("Error fetching balance:", error);
   }
 };
 
+const sendCoins = async (amount, toEmail) => {
+  const token = authService.getToken();
+  try {
+    const response = await fetch(`${BASE_URL}/send`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ toEmail, amount }),
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error sending coins:", error.message);
+    console.error(error.message);
+  }
+};
+
+const transactions = async () => {
+  const token = authService.getToken();
+  try {
+    const response = await fetch(`${BASE_URL}/transactions`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error sending coins:", error.message);
+    console.error(error.message);
+  }
+};
+
 const tokenService = {
   fetchBalance,
+  sendCoins,
+  transactions,
 };
 
 export default tokenService;
